@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 # --- Conexão com o Banco de Dados ---
 
 # 1. Pega a URI de conexão da variável de ambiente que configuramos na Square Cloud
-MONGO_URI = os.getenv("MONGO_URI")
+MONGO_URI = os.getenv("mongodb://default:2abIFuPjHOqfkDFIZhazxZ4U@square-cloud-db-75614e75124a45ad898663cfe8e71178.squareweb.app:7037")
 
 # Inicializa as variáveis como None. Se a conexão falhar, elas permanecerão assim.
 db_client = None
