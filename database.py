@@ -1,6 +1,7 @@
-# database.py (VERSÃO FINAL - CORRIGIDA COM SEUS NOMES DE ARQUIVO)
+# database.py (VERSÃO FINAL - CORRIGIDA COM AJUSTE DE PERMISSÕES)
 
 import os
+import stat # Módulo para ajudar a definir permissões
 import logging
 from dotenv import load_dotenv
 from sqlalchemy import (
@@ -29,19 +30,24 @@ db_metadata = MetaData()
 if not POSTGRES_URI:
     logger.critical("A variável de ambiente POSTGRES_URI não foi encontrada!")
 else:
+    # --- NOVO BLOCO DE CÓDIGO: AJUSTE DE PERMISSÕES ---
+    # Antes de tentar conectar, vamos garantir que a chave privada está segura.
+    KEY_FILE_PATH = 'private-key.key'
     try:
-        # --- MUDANÇA CRÍTICA AQUI ---
-        # O dicionário 'connect_args' foi atualizado para usar os nomes
-        # EXATOS dos arquivos que você baixou.
-        
+        if os.path.exists(KEY_FILE_PATH):
+            # Define as permissões para 0600 (apenas o dono pode ler e escrever)
+            os.chmod(KEY_FILE_PATH, stat.S_IRUSR | stat.S_IWUSR)
+            logger.info(f"Permissões do arquivo '{KEY_FILE_PATH}' ajustadas para 0600.")
+    except Exception as e:
+        logger.error(f"Não foi possível alterar as permissões do arquivo de chave: {e}")
+    # ---------------------------------------------------
+
+    try:
         ssl_args = {
             'sslmode': 'verify-full',
-            # Certificado Raiz (CA)
             'sslrootcert': 'ca-certificate.crt', 
-            # Certificado do Cliente (usando o mesmo arquivo .crt)
             'sslcert': 'ca-certificate.crt', 
-            # Chave Privada do Cliente
-            'sslkey': 'private-key.key'    
+            'sslkey': KEY_FILE_PATH
         }
 
         engine = create_engine(
@@ -49,7 +55,6 @@ else:
             connect_args=ssl_args
         )
 
-        # O resto do arquivo permanece o mesmo...
         players_table = Table(
             "players",
             db_metadata,
