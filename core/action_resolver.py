@@ -114,6 +114,7 @@ class ActionResolver:
                 possible_targets_query = [p.member.id for p in game.players.values() if not p.is_alive] if is_revive else [p.member.id for p in game.get_alive_players_states()]
                 possible_targets = [pid for pid in possible_targets_query if pid not in [player_id, original_target_id]]
                 
+                # >>> CORREÇÃO 1: Impede o crash se a lista de alvos possíveis estiver vazia.
                 if possible_targets:
                     new_target_id = random.choice(possible_targets)
                     action_data["target_id"] = new_target_id
@@ -277,10 +278,16 @@ class ActionResolver:
                         killer_ids = killer_info if isinstance(killer_info, list) else [killer_info]
                         if killer_ids and (killer_member := game.get_player_by_id(random.choice(killer_ids))):
                             innocent_pool = [p.member for p in game.get_alive_players_states() if p.member.id not in [player_id, killed_id, killer_member.id]]
-                            clue_members = [killer_member, random.choice(innocent_pool)] if innocent_pool else [killer_member]
-                            random.shuffle(clue_members)
-                            info_msg = f"🕵️ {killed_member.display_name} foi morto. Um destes está envolvido: **{', '.join([m.display_name for m in clue_members])}**."
-                        else: info_msg = f"🕵️ {killed_member.display_name} foi morto, mas o assassino é um mistério."
+                            
+                            # >>> CORREÇÃO 2: Bloco if/else para dar feedback correto e evitar crash.
+                            if innocent_pool:
+                                clue_members = [killer_member, random.choice(innocent_pool)]
+                                random.shuffle(clue_members)
+                                info_msg = f"🕵️ {killed_member.display_name} foi morto. Um destes está envolvido: **{', '.join([m.display_name for m in clue_members])}**."
+                            else:
+                                info_msg = f"🕵️ {killed_member.display_name} foi morto. Sua única pista aponta diretamente para **{killer_member.display_name}**."
+                        else:
+                            info_msg = f"🕵️ {killed_member.display_name} foi morto, mas o assassino é um mistério."
                         results["dm_messages"].setdefault(player_id, []).append(info_msg)
 
         haunt_action = next((data for _, data in sorted_actions if data["action"] == "haunt"), None)
