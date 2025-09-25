@@ -6,16 +6,18 @@ from discord import option, ApplicationContext
 import logging
 from typing import Dict, List, Any
 
+# --- NOSSAS NOVAS IMPORTAÇÕES ---
+# Funções do SQLAlchemy para construir queries de forma segura
+from sqlalchemy import select, insert, update
+
 import config
 from .utils import send_public_message
 from .game_instance import GameInstance
-# >>> MUDANÇA 1: Importa a coleção do nosso novo gerenciador de banco de dados (database.py)
-from database import db_collection
+# Importa o 'engine' e a 'players_table' do nosso novo database.py
+from database import engine, players_table
 
 logger = logging.getLogger(__name__)
 
-# >>> MUDANÇA 2: As funções antigas de manipulação de JSON (load_ranking, save_ranking) e o lock foram removidos.
-# O MongoDB gerencia o acesso e a persistência dos dados de forma atômica e segura.
 
 class RankingCog(commands.Cog):
     """Cog para gerenciar o sistema de ranking global com estatísticas e medalhas."""
@@ -23,21 +25,18 @@ class RankingCog(commands.Cog):
         self.bot = bot
         self.medal_definitions = self.load_medal_definitions()
         
-        # >>> MUDANÇA 3: Adicionamos uma verificação crucial na inicialização.
-        # Se a conexão com o banco de dados falhou (db_collection será None),
-        # este Cog se desativará para evitar erros durante o jogo.
-        if db_collection is None:
-            logger.error("A coleção do MongoDB não está disponível. O Cog de Ranking será desativado.")
-            # Itera sobre todos os comandos de barra neste Cog e os remove do bot
+        # A verificação de inicialização agora checa se o 'engine' do SQLAlchemy foi criado com sucesso.
+        if engine is None:
+            logger.error("O engine do SQLAlchemy não está disponível. O Cog de Ranking será desativado.")
+            # Remove os comandos de barra deste Cog se o banco de dados não estiver disponível
             if hasattr(self, '__cog_app_commands__'):
                 for command in self.__cog_app_commands__:
                     self.bot.remove_application_command(command)
         else:
-            logger.info("Cog Ranking carregado e conectado ao MongoDB.")
+            logger.info("Cog Ranking carregado e conectado ao PostgreSQL.")
 
     def load_medal_definitions(self) -> Dict[str, Dict[str, str]]:
-        """Carrega as definições de títulos e medalhas para fácil acesso."""
-        # Esta estrutura permanece a mesma
+        """Carrega as definições de títulos e medalhas. Esta função não precisa mudar."""
         return {
             "Assassino Alfa": {"título": "O Pesadelo da Vizinhança", "medalha": "Líder do Mal"},
             "Anjo": {"título": "O Despachado do Além", "medalha": "O Anjo da Guarda"},
@@ -49,75 +48,105 @@ class RankingCog(commands.Cog):
 
     async def update_stats_after_game(self, game: GameInstance, winners: List[discord.Member]):
         """
-        Atualiza as estatísticas de todos os jogadores de uma partida concluída.
-        Esta função é chamada pelo GameFlowCog no final de um jogo.
+        Atualiza as estatísticas de todos os jogadores de uma partida concluída no banco de dados PostgreSQL.
         """
         all_player_states = list(game.players.values())
         winner_ids = {w.id for w in winners}
 
-        for p_state in all_player_states:
-            player = p_state.member
-            player_id = player.id
-            
-            # >>> MUDANÇA 4: Lógica de atualização usando operadores atômicos do MongoDB.
-            # Esta é a maneira mais eficiente e segura de atualizar os dados.
-            
-            # Prepara os campos que serão atualizados
-            update_fields = {
-                '$inc': {'partidas_jogadas': 1},  # Incrementa o número de partidas jogadas
-                '$set': {'nome_jogador': player.display_name}  # Atualiza o nome do jogador
-            }
+        # Abre uma conexão e inicia uma transação. Todas as operações dentro deste bloco
+        # serão confirmadas (commit) no final. Se um erro ocorrer, nada é salvo (rollback).
+        with engine.begin() as conn:
+            for p_state in all_player_states:
+                player = p_state.member
+                player_id = player.id
 
-            # Se o jogador for um vencedor, adiciona os incrementos de vitória
-            if player_id in winner_ids:
-                update_fields['$inc']['vitorias_totais'] = 1
-                if p_state.role:
+                # 1. Busca os dados atuais do jogador (se existirem)
+                current_stats_result = conn.execute(
+                    select(players_table).where(players_table.c.player_id == player_id)
+                ).first()
+
+                is_winner = player_id in winner_ids
+                
+                if current_stats_result:
+                    # --- LÓGICA DE UPDATE (Jogador já existe) ---
+                    stats = dict(current_stats_result._mapping)
+                    
+                    # Prepara os novos valores para as colunas
+                    updated_values = {
+                        "nome_jogador": player.display_name,
+                        "partidas_jogadas": stats['partidas_jogadas'] + 1,
+                    }
+
+                    if is_winner:
+                        updated_values["vitorias_totais"] = stats['vitorias_totais'] + 1
+                        if p_state.role:
+                            role_name = p_state.role.name
+                            # Copia o dicionário para evitar modificar o original em memória
+                            vitorias_por_papel = dict(stats['vitorias_por_papel'])
+                            vitorias_por_papel[role_name] = vitorias_por_papel.get(role_name, 0) + 1
+                            updated_values["vitorias_por_papel"] = vitorias_por_papel
+                    
+                    # Constrói e executa a query de UPDATE
+                    stmt = update(players_table).where(players_table.c.player_id == player_id).values(**updated_values)
+                    conn.execute(stmt)
+                else:
+                    # --- LÓGICA DE INSERT (Novo jogador) ---
+                    vitorias_por_papel = {}
+                    vitorias_totais = 0
+                    if is_winner:
+                        vitorias_totais = 1
+                        if p_state.role:
+                            vitorias_por_papel[p_state.role.name] = 1
+
+                    # Constrói e executa a query de INSERT
+                    stmt = insert(players_table).values(
+                        player_id=player_id,
+                        nome_jogador=player.display_name,
+                        partidas_jogadas=1,
+                        vitorias_totais=vitorias_totais,
+                        vitorias_por_papel=vitorias_por_papel,
+                        medalhas=[] # Começa com uma lista vazia de medalhas
+                    )
+                    conn.execute(stmt)
+
+                # --- LÓGICA DE VERIFICAÇÃO DE MEDALHAS ---
+                # Após a atualização, buscamos os dados mais recentes para a verificação.
+                updated_stats = dict(conn.execute(
+                    select(players_table).where(players_table.c.player_id == player_id)
+                ).first()._mapping)
+                
+                if updated_stats.get("partidas_jogadas") in [50, 150]:
+                    medal_map = {50: "Maratonista", 150: "Lenda da Cidade"}
+                    await self.award_medal(conn, player, medal_map[updated_stats["partidas_jogadas"]], game.text_channel)
+            
+                if is_winner and p_state.role:
                     role_name = p_state.role.name
-                    # Usa a notação de ponto para incrementar um campo dentro de um sub-documento (objeto)
-                    update_fields['$inc'][f'vitorias_por_papel.{role_name}'] = 1
-
-            # Executa a operação de atualização no banco de dados.
-            # update_one encontra um documento com o _id correspondente.
-            # upsert=True significa: se o jogador não for encontrado, crie um novo documento para ele.
-            db_collection.update_one(
-                {'_id': player_id},
-                update_fields,
-                upsert=True
-            )
+                    if updated_stats.get("vitorias_por_papel", {}).get(role_name) == 10:
+                        if medal_info := self.medal_definitions.get(role_name):
+                            if medalha := medal_info.get("medalha"):
+                                await self.award_medal(conn, player, medalha, game.text_channel)
             
-            # Após a atualização, precisamos buscar os dados mais recentes para verificar as medalhas
-            stats = db_collection.find_one({'_id': player_id})
-            if not stats: continue
+        logger.info(f"[Jogo #{game.text_channel.id}] Estatísticas atualizadas no PostgreSQL para {len(all_player_states)} jogadores.")
 
-            # Lógica de verificação de medalhas (inalterada, mas agora usa os dados do DB)
-            if stats.get("partidas_jogadas") in [50, 150]:
-                 medal_map = {50: "Maratonista", 150: "Lenda da Cidade"}
-                 await self.award_medal(player, medal_map[stats["partidas_jogadas"]], game.text_channel)
-            
-            if player_id in winner_ids and p_state.role:
-                role_name = p_state.role.name
-                if stats.get("vitorias_por_papel", {}).get(role_name) == 10:
-                    if medal_info := self.medal_definitions.get(role_name):
-                        if medalha := medal_info.get("medalha"):
-                            await self.award_medal(player, medalha, game.text_channel)
-
-        logger.info(f"[Jogo #{game.text_channel.id}] Estatísticas atualizadas no MongoDB para {len(all_player_states)} jogadores.")
-
-    async def award_medal(self, player: discord.Member, medal_key: str, announcement_channel: discord.TextChannel):
+    async def award_medal(self, conn, player: discord.Member, medal_key: str, announcement_channel: discord.TextChannel):
         """Concede uma medalha a um jogador se ele ainda não a tiver."""
         player_id = player.id
-        
-        # >>> MUDANÇA 5: O operador '$addToSet' é perfeito para listas de itens únicos.
-        # Ele só adiciona 'medal_key' ao array 'medalhas' se o item ainda não estiver lá.
-        result = db_collection.update_one(
-            {'_id': player_id},
-            {'$addToSet': {'medalhas': medal_key}}
-        )
 
-        # 'result.modified_count' será 1 se a medalha foi realmente adicionada.
-        # Se a medalha já existia, será 0.
-        if result.modified_count > 0:
-            logger.info(f"Medalha '{medal_key}' concedida a {player.display_name} no MongoDB.")
+        # Busca a lista de medalhas atual do jogador.
+        current_medals = conn.execute(
+            select(players_table.c.medalhas).where(players_table.c.player_id == player_id)
+        ).scalar_one() # .scalar_one() pega o primeiro valor da primeira linha
+        
+        # O resultado do JSON é uma lista, então podemos checar diretamente
+        if medal_key not in current_medals:
+            # Cria a nova lista de medalhas
+            new_medals = current_medals + [medal_key]
+            
+            # Atualiza a coluna de medalhas no banco de dados com a nova lista
+            conn.execute(
+                update(players_table).where(players_table.c.player_id == player_id).values(medalhas=new_medals)
+            )
+            logger.info(f"Medalha '{medal_key}' concedida a {player.display_name} no PostgreSQL.")
             await send_public_message(
                 self.bot, 
                 announcement_channel,
@@ -129,13 +158,12 @@ class RankingCog(commands.Cog):
         """Exibe um placar com os 10 melhores jogadores, classificados por vitórias."""
         await ctx.defer()
         
-        # >>> MUDANÇA 6: A consulta ao banco de dados substitui toda a lógica de carregar e ordenar o JSON.
-        # find() busca documentos.
-        # sort("vitorias_totais", -1) ordena pelo campo de vitórias em ordem decrescente.
-        # limit(10) pega apenas os 10 primeiros resultados.
-        top_players = list(db_collection.find().sort("vitorias_totais", -1).limit(10))
+        with engine.connect() as conn:
+            # Constrói a query para selecionar os 10 melhores por vitórias totais
+            stmt = select(players_table).order_by(players_table.c.vitorias_totais.desc()).limit(10)
+            top_players_result = conn.execute(stmt).fetchall()
 
-        if not top_players:
+        if not top_players_result:
             await ctx.followup.send("O placar ainda está vazio! Nenhuma partida foi jogada.")
             return
 
@@ -146,7 +174,8 @@ class RankingCog(commands.Cog):
         )
         
         lines = []
-        for i, stats in enumerate(top_players):
+        for i, row in enumerate(top_players_result):
+            stats = row._mapping
             player_name = stats.get('nome_jogador', 'Jogador Desconhecido')
             wins = stats.get('vitorias_totais', 0)
             games = stats.get('partidas_jogadas', 0)
@@ -156,7 +185,6 @@ class RankingCog(commands.Cog):
         
         embed.description = "\n".join(lines)
         embed.set_footer(text="Continue jogando para subir no ranking!")
-
         await ctx.followup.send(embed=embed)
 
     @commands.slash_command(name="perfil", description="Mostra suas estatísticas, títulos e medalhas.")
@@ -166,17 +194,21 @@ class RankingCog(commands.Cog):
         await ctx.defer()
         target_user = usuario or ctx.author
         
-        # >>> MUDANÇA 7: Busca um único jogador no banco de dados pelo seu ID.
-        stats = db_collection.find_one({'_id': target_user.id})
+        with engine.connect() as conn:
+            # Busca o perfil do jogador específico pelo seu ID
+            stmt = select(players_table).where(players_table.c.player_id == target_user.id)
+            stats_result = conn.execute(stmt).first()
 
-        if not stats:
+        if not stats_result:
             await ctx.followup.send(f"**{target_user.display_name}** ainda não tem um perfil. É hora de jogar!")
             return
         
-        # Lógica de exibição do perfil (inalterada)
+        stats = stats_result._mapping
+        
+        # A lógica para exibir os dados permanece a mesma
         main_title = "Novato na Cidade"
-        if stats.get("vitorias_por_papel"):
-            for role_name, wins in sorted(stats["vitorias_por_papel"].items(), key=lambda item: item[1], reverse=True):
+        if vitorias_por_papel := stats.get("vitorias_por_papel"):
+            for role_name, wins in sorted(vitorias_por_papel.items(), key=lambda item: item[1], reverse=True):
                 if wins >= 5 and (title_info := self.medal_definitions.get(role_name)) and (title := title_info.get("título")):
                     main_title = title
                     break
@@ -212,6 +244,7 @@ class RankingCog(commands.Cog):
             embed.add_field(name=f"Conquistas ({len(medals)})", value=medals_text, inline=False)
         
         await ctx.followup.send(embed=embed)
+
 
 def setup(bot: commands.Bot):
     bot.add_cog(RankingCog(bot))

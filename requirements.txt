@@ -7,6 +7,7 @@ cffi==2.0.0
 charset-normalizer==3.4.3
 colorama==0.4.6
 frozenlist==1.7.0
+greenlet==3.2.4
 idna==3.10
 iniconfig==2.1.0
 multidict==6.6.4
@@ -14,6 +15,7 @@ packaging==25.0
 pillow==11.3.0
 pluggy==1.6.0
 propcache==0.3.2
+psycopg2-binary==2.9.10
 py-cord==2.6.1
 pycparser==2.23
 Pygments==2.19.2
@@ -22,10 +24,7 @@ pytest==8.4.2
 pytest-asyncio==1.2.0
 python-dotenv==1.1.1
 requests==2.32.5
+SQLAlchemy==2.0.43
 typing_extensions==4.15.0
 urllib3==2.5.0
 yarl==1.20.1
-audioop-lts
-pymongo
-dnspython
-certifi
