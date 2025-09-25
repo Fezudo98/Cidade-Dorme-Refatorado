@@ -15,3 +15,6 @@ venv/
 env/
 ENV/
 Cidade Dorme Experimental.zip
+ca-certificate.crt
+ca-certificate.pem
+private-key.key
