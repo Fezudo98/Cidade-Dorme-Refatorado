@@ -1,0 +1,4 @@
+# Link de convite com permissões específicas para maior segurança.
+# Permissões: Ver Canais, Enviar Mensagens, Gerenciar Mensagens, Embed Links,
+# Anexar Arquivos, Conectar, Falar, Mover Membros, Silenciar Membros.
+https://discord.com/oauth2/authorize?client_id=1391381616827306115&permissions=139610941504&integration_type=0&scope=bot+applications.commands

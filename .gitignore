@@ -1,0 +1,16 @@
+# Arquivo de ambiente com o token do bot. ESSENCIAL IGNORAR!
+.env
+
+# Arquivos de dados gerados pelo bot. É melhor não versionar o estado do ranking.
+# Se você quiser manter o ranking, faça um backup manual.
+data/ranking.json
+
+# Pasta de cache do Python. Não é necessária no repositório.
+__pycache__/
+*.pyc
+
+# Pastas de ambiente virtual (se você usar uma).
+venv/
+.venv/
+env/
+ENV/

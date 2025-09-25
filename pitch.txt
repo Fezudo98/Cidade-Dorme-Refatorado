@@ -1,0 +1,29 @@
+Olá, [Nome do Influenciador]!
+Meu nome é Fernando Sérgio, e sou o desenvolvedor do Cidade Dorme Online, um novo bot para Discord que automatiza completamente o clássico jogo de dedução social (também conhecido como Máfia ou Werewolf).
+Acompanho seu trabalho e admiro muito a forma como você interage com sua comunidade. Acredito que o Cidade Dorme Online seria uma ferramenta fantástica para criar eventos interativos, engajar seus seguidores e gerar conteúdo de altíssima qualidade e diversão para seus vídeos ou streams.
+Por que o "Cidade Dorme Online" é Diferente?
+Diferente de outros bots ou de moderar o jogo manualmente, o nosso bot foi criado do zero para ser uma experiência completa e imersiva:
+✅ Totalmente Automatizado: Chega de precisar de um moderador! O bot cuida de tudo: distribui papéis secretamente, gerencia as fases de dia e noite, silencia e desmuta jogadores, processa as ações e declara o vencedor.
+🎭 Jogabilidade Profunda e Balanceada: Com mais de 15 papéis únicos divididos em 3 facções (Cidade, Vilões e Solos), cada partida é imprevisível e estratégica.
+🔊 Experiência Imersiva: Efeitos sonoros para eventos cruciais (início da noite, disparos, mortes) e uma interface visual com imagens para cada papel e evento do jogo.
+🏆 Engajamento Contínuo: Um sistema de ranking e perfil que salva as estatísticas dos jogadores. Sua comunidade vai querer jogar mais e mais para subir no placar, ganhar medalhas e desbloquear títulos especiais.
+Como Jogar em Menos de 5 Minutos
+É incrivelmente simples de começar:
+Convide o Bot para o seu servidor.
+Reúna seus amigos (de 5 a 16 jogadores) em um canal de voz.
+Em um canal de texto, digite /preparar.
+Quando todos receberem seus papéis por DM, o líder digita /iniciar.
+Pronto! Que comecem os jogos mentais!
+Convite para Ação
+Gostaríamos muito que você experimentasse o bot. Ele é a ferramenta perfeita para uma live especial com seus inscritos ou para um vídeo de "melhores momentos" cheio de traições e jogadas geniais.
+Adicione o bot ao seu servidor agora mesmo:
+https://discord.com/oauth2/authorize?client_id=1391381616827306115&permissions=277025508352&integration_type=0&scope=bot+applications.commands
+Quer ver o bot em ação ou tirar dúvidas?
+Entre no nosso servidor oficial do Discord! Será um prazer te receber e organizar uma partida de demonstração.
+➡️ Servidor Oficial: https://discord.gg/a9eAWQch ⬅️
+Agradeço muito pelo seu tempo e ficaria honrado em ver o Cidade Dorme Online fazendo parte da sua comunidade.
+Atenciosamente,
+Fernando Sérgio
+Desenvolvedor do Cidade Dorme Online
+GitHub: Fezudo98
+Email: cidadedorme6@gmail.com

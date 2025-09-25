@@ -1,0 +1,35 @@
+{
+  "GAME_COMPOSITIONS": {
+    "5": {"Cidade": 4, "Vilões": 1, "Solo": 0},
+    "6": {"Cidade": 5, "Vilões": 1, "Solo": 0},
+    "7": {"Cidade": 5, "Vilões": 1, "Solo": 1},
+    "8": {"Cidade": 5, "Vilões": 2, "Solo": 1},
+    "9": {"Cidade": 5, "Vilões": 2, "Solo": 2},
+    "10": {"Cidade": 6, "Vilões": 3, "Solo": 1},
+    "11": {"Cidade": 6, "Vilões": 3, "Solo": 2},
+    "12": {"Cidade": 7, "Vilões": 3, "Solo": 2},
+    "13": {"Cidade": 7, "Vilões": 3, "Solo": 3},
+    "14": {"Cidade": 8, "Vilões": 4, "Solo": 2},
+    "15": {"Cidade": 8, "Vilões": 4, "Solo": 3},
+    "16": {"Cidade": 9, "Vilões": 4, "Solo": 3}
+  },
+  "ROLE_POOL": {
+    "Cidade": {
+        "essenciais": ["Prefeito", "Guarda-costas", "Xerife", "Anjo"],
+        "investigadores": ["Detetive", "Vidente de Aura", "Médium"]
+    },
+    "Vilões": {
+        "essenciais": ["Assassino Alfa"],
+        "outros": ["Assassino Júnior", "Cúmplice"]
+    },
+    "Solo": {
+        "exclusivos": ["Palhaço", "Caçador de Cabeças"],
+        "outros": ["Bruxo", "Fofoqueiro", "Cupido", "Praga", "Corruptor"]
+    }
+  },
+  "HUMOR_MESSAGES": {
+    "NIGHT_START": ["A lua sobe, as máscaras caem... ou são colocadas? 🌙", "Shhh! É hora de fazer maldades... ou só de fingir que está dormindo mesmo."],
+    "DAY_START": ["O sol nasceu na fazendinha... digo, na cidade! Quem não acordou hoje? ☀️", "Bom dia, raio de sol! Ou nem tanto, se você foi alvo de alguém."],
+    "VOTE_START": ["Acendam as tochas! Peguem os forcados! (Metaforicamente, claro). Hora de decidir quem vai pro olho da rua. 🔥", "Democracia em ação! Ou só a lei do mais forte mesmo. Votem!"]
+  }
+}
