@@ -5,7 +5,13 @@ from discord.ext import commands
 from discord import option, ApplicationContext
 import logging
 import random
+import os
 from typing import Optional, Dict, Type, TYPE_CHECKING
+
+# --- CORREÇÃO APLICADA AQUI ---
+from sqlalchemy import text # Importado da biblioteca correta
+from sqlalchemy.exc import SQLAlchemyError
+from database import engine
 
 import config
 from roles.base_role import Role
@@ -44,7 +50,6 @@ async def send_public_message(bot: commands.Bot, channel: discord.TextChannel, m
             discord_file = discord.File(file_path)
         except FileNotFoundError:
             logger.error(f"Arquivo de imagem não encontrado em: {file_path}")
-            # --- NOVA LÓGICA DE NOTIFICAÇÃO ---
             if game and not game.asset_error_notified:
                 game.asset_error_notified = True
                 await channel.send(f"⚠️ **Aviso para o Admin:** Não encontrei os arquivos de imagem/áudio. Verifique se a pasta `assets` foi enviada corretamente para a hospedagem do bot.")
@@ -52,7 +57,6 @@ async def send_public_message(bot: commands.Bot, channel: discord.TextChannel, m
         await channel.send(content=message, embed=embed, file=discord_file, allowed_mentions=allowed_mentions)
     except discord.Forbidden:
         logger.error(f"Sem permissão para enviar mensagens no canal {channel.name}.")
-        # Se não puder enviar a mensagem de erro, apenas loga.
         if game and not game.permission_error_notified:
             game.permission_error_notified = True
             logger.critical(f"CRÍTICO: Não consigo enviar mensagens no canal do jogo {channel.name}. Verifique as permissões de 'Ver Canal' e 'Enviar Mensagens'.")
@@ -72,7 +76,6 @@ async def send_dm_safe(member: discord.Member, message: str = None, embed: disco
 # --- Mensagens Humorísticas (Centralizadas) ---
 def get_random_humor(category_key: str) -> str:
     """Retorna uma frase humorística aleatória de uma categoria."""
-    # Agora usa a variável importada de config.py
     return random.choice(config.HUMOR_MESSAGES.get(category_key, [""]))
 
 class UtilsCog(commands.Cog):
@@ -136,28 +139,66 @@ class UtilsCog(commands.Cog):
         latency = self.bot.latency * 1000
         await ctx.respond(f"Pong! A latência é de {latency:.2f}ms. Estou mais vivo que a maioria dos jogadores na noite 3!", ephemeral=True)
 
+    # --- COMANDOS DE ADMINISTRAÇÃO ROBUSTOS ---
+
+    @commands.slash_command(name="health", description="[Admin] Verifica o estado dos sistemas do bot.")
+    @commands.has_permissions(manage_guild=True)
+    async def health_check(self, ctx: ApplicationContext):
+        """Executa uma verificação de saúde nos sistemas principais do bot."""
+        await ctx.defer(ephemeral=True)
+        
+        embed = discord.Embed(title="🩺 Verificação de Saúde do Bot", color=discord.Color.green())
+        
+        # 1. Latência da API do Discord
+        latency = self.bot.latency * 1000
+        embed.add_field(name="🌐 Conexão com Discord", value=f"✅ Latência: {latency:.2f}ms", inline=False)
+        
+        # 2. Conexão com o Banco de Dados
+        db_status = "❌ Falha"
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1")) # Query simples para testar a conexão
+            db_status = "✅ Conectado"
+        except SQLAlchemyError as e:
+            logger.error(f"Falha na verificação de saúde do banco de dados: {e}")
+            embed.color = discord.Color.orange() # Define a cor do embed como aviso
+        
+        embed.add_field(name="🗄️ Banco de Dados (PostgreSQL)", value=db_status, inline=False)
+        
+        # 3. Acesso à pasta de Assets
+        assets_path = config.ASSETS_PATH
+        assets_status = "❌ Diretório não encontrado!"
+        if os.path.isdir(assets_path):
+            assets_status = "✅ Acessível"
+        else:
+            embed.color = discord.Color.red() # Erro crítico, muda a cor para vermelho
+        embed.add_field(name="🖼️ Pasta de Assets", value=f"{assets_status} (caminho: `{assets_path}`)", inline=False)
+        
+        await ctx.followup.send(embed=embed)
+
     @commands.slash_command(name="encerrar", description="[Admin] Força o fim de uma partida ou cancela uma preparação neste canal.")
     @commands.has_permissions(manage_guild=True)
     async def encerrar(self, ctx: ApplicationContext):
         """Força o encerramento de um jogo no canal atual."""
+        await ctx.defer(ephemeral=True) 
         game = self.bot.game_manager.get_game(ctx.channel.id)
         if not game:
-            await ctx.respond("Nenhum jogo em andamento ou em preparação para encerrar neste canal.", ephemeral=True)
+            await ctx.followup.send("Nenhum jogo em andamento ou em preparação para encerrar neste canal.")
             return
             
         game_flow_cog = self.bot.get_cog("GameFlowCog")
         if not game_flow_cog:
-            await ctx.respond("Erro: Não foi possível encontrar o controle de fluxo do jogo.", ephemeral=True)
+            await ctx.followup.send("Erro: Não foi possível encontrar o controle de fluxo do jogo.")
             return
 
-        await ctx.respond("Encerrando a sessão atual à força...", ephemeral=True)
+        await ctx.followup.send("Encerrando a sessão atual à força...")
         await game_flow_cog.end_game(
             game,
             "Fim de Jogo Forçado", 
-            [], # Sem vencedores
+            [], 
             "Ninguém", 
             "A partida foi encerrada por um administrador.", 
-            error=True # Impede a atualização de estatísticas
+            error=True
         )
 
     @commands.slash_command(name="desmutar_todos", description="[Admin] Força o unmute de todos no canal de voz da partida atual.")
