@@ -146,38 +146,45 @@ class GameSetupCog(commands.Cog):
         description="Inicia a preparação de um jogo, puxando jogadores do seu canal de voz."
     )
     async def preparar_jogo(self, ctx: ApplicationContext):
+        # --- CORREÇÃO APLICADA ---
+        # Adia a resposta para garantir que não haja timeout de 3 segundos,
+        # mesmo que a API do Discord atrase ou haja um rate limit.
+        await ctx.defer(ephemeral=True)
+
         logger.info(f"Comando /preparar recebido de {ctx.author.display_name} no canal #{ctx.channel.name}")
 
         if self.bot.game_manager.get_game(ctx.channel.id):
-            await ctx.respond("Já existe uma partida sendo preparada ou em andamento neste canal.", ephemeral=True)
+            # Usa followup.send para responder após um defer().
+            await ctx.followup.send("Já existe uma partida sendo preparada ou em andamento neste canal.", ephemeral=True)
             return
 
         # 1. Checa se o AUTOR do comando está em um canal de voz
         if not ctx.author.voice or not ctx.author.voice.channel:
             logger.warning(f"Usuário {ctx.author.display_name} usou /preparar mas não está em um canal de voz.")
-            await ctx.respond("Você precisa estar em um canal de voz para iniciar um jogo!", ephemeral=True)
+            await ctx.followup.send("Você precisa estar em um canal de voz para iniciar um jogo!", ephemeral=True)
             return
 
         # 2. Pega o canal de voz do autor. Esta é a referência correta.
         voice_channel = ctx.author.voice.channel
         
         # 3. Pega a lista de membros diretamente deste canal.
-        #    Com as intents e o cache de voz ligados, esta lista DEVE estar correta.
         connected_members = [member for member in voice_channel.members if not member.bot]
         num_players = len(connected_members)
         
         logger.info(f"Membros encontrados no canal de voz '{voice_channel.name}': {[m.display_name for m in connected_members]}. Total: {num_players}")
 
         if not (config.MIN_PLAYERS <= num_players <= config.MAX_PLAYERS):
-            await ctx.respond(f"Opa! Precisamos de {config.MIN_PLAYERS} a {config.MAX_PLAYERS} jogadores, e vocês são {num_players}.", ephemeral=True)
+            await ctx.followup.send(f"Opa! Precisamos de {config.MIN_PLAYERS} a {config.MAX_PLAYERS} jogadores, e vocês são {num_players}.", ephemeral=True)
             return
 
         game = None
         try:
-            await ctx.respond(f"Iniciando preparação para {num_players} jogadores. Verifiquem suas DMs!", ephemeral=True)
+            # A mensagem de "Iniciando preparação" é efêmera, então é enviada como um followup.
+            await ctx.followup.send(f"Iniciando preparação para {num_players} jogadores. Verifiquem suas DMs!", ephemeral=True)
             
             game = self.bot.game_manager.create_game(ctx.channel, voice_channel, ctx.author)
             if not game:
+                # Se a criação do jogo falhar, ainda podemos usar o followup para notificar.
                 await ctx.followup.send("Erro inesperado ao criar a partida. Tente novamente.", ephemeral=True)
                 return
             
@@ -186,6 +193,7 @@ class GameSetupCog(commands.Cog):
 
             success = await self._distribute_roles(game, connected_members)
             if not success:
+                # Esta é uma mensagem pública, então ctx.channel.send é o correto.
                 await ctx.channel.send(f"⚠️ **Erro na Preparação:** Não foi possível distribuir os papéis. Verifique as configurações e os logs do bot. A preparação foi cancelada.")
                 self.bot.game_manager.end_game(ctx.channel.id)
                 return
@@ -198,10 +206,11 @@ class GameSetupCog(commands.Cog):
                 f"{player_list_text}\n\n"
                 f"🤫 Papéis distribuídos por **DM**. Quando estiverem prontos, o Mestre do Jogo (`{ctx.author.display_name}`) deve usar `/iniciar`."
             )
+            # A mensagem de anúncio principal é pública, então ctx.channel.send está correto.
             await ctx.channel.send(announcement)
 
         except Exception as e:
-            await ctx.respond("Opa! Algo deu muito errado aqui dentro. A preparação foi cancelada.", ephemeral=True)
+            await ctx.followup.send("Opa! Algo deu muito errado aqui dentro. A preparação foi cancelada.", ephemeral=True)
             logger.exception("Erro inesperado durante o comando /preparar:", exc_info=e)
             if game and self.bot.game_manager.get_game(game.text_channel.id):
                 self.bot.game_manager.end_game(game.text_channel.id)
