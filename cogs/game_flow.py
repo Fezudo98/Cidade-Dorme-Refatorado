@@ -99,34 +99,55 @@ class GameFlowCog(commands.Cog):
                 logger.info(f"[Jogo #{game.text_channel.id}] Timer cancelado.")
         game.current_timer_task = asyncio.create_task(timer_task())
 
+    # --- FUNÇÃO CORRIGIDA ---
     async def play_sound_effect(self, game: GameInstance, event_key: str, wait_for_finish: bool = False):
         if not config.AUDIO_ENABLED or not game.voice_channel: return
         if not (sound_list := config.AUDIO_FILES.get(event_key)): return
+
         chosen_file = random.choice(sound_list)
         audio_path = os.path.join(config.AUDIO_PATH, chosen_file)
+
         if not os.path.exists(audio_path):
             logger.error(f"Arquivo de áudio não encontrado: {audio_path}")
             if not game.asset_error_notified:
                 game.asset_error_notified = True
                 await send_public_message(self.bot, game.text_channel, message=f"⚠️ **Aviso para o Admin:** Não encontrei os arquivos de áudio/imagem.")
             return
+
         if not game.voice_channel.members: return
-        voice_client = discord.utils.get(self.bot.voice_clients, guild=game.guild)
+
         try:
-            if not voice_client or not voice_client.is_connected():
+            # Pega o cliente de voz existente para o servidor.
+            voice_client = discord.utils.get(self.bot.voice_clients, guild=game.guild)
+
+            # Se não estiver conectado, conecta.
+            if voice_client is None or not voice_client.is_connected():
                 voice_client = await asyncio.wait_for(game.voice_channel.connect(), timeout=10.0)
+            # Se estiver conectado em outro canal, move para o canal do jogo.
             elif voice_client.channel != game.voice_channel:
                 await voice_client.move_to(game.voice_channel)
-            if voice_client.is_playing(): voice_client.stop()
+            
+            # Agora, temos certeza que 'voice_client' é válido e está no canal correto.
+            if voice_client.is_playing():
+                voice_client.stop()
+            
             source = discord.FFmpegPCMAudio(audio_path)
+            
             if wait_for_finish:
                 finished = asyncio.Event()
                 voice_client.play(source, after=lambda e: finished.set())
                 await asyncio.wait_for(finished.wait(), timeout=30.0)
             else:
                 voice_client.play(source)
+
+        except discord.errors.ClientException as e:
+            # Captura especificamente o erro de já estar conectado para evitar spam nos logs
+            if "Already connected" in str(e):
+                logger.warning(f"[Jogo #{game.text_channel.id}] Tentativa de conexão de áudio redundante foi ignorada.")
+            else:
+                logger.error(f"[Jogo #{game.text_channel.id}] Erro de cliente de áudio: {e}", exc_info=True)
         except Exception as e:
-            logger.error(f"[Jogo #{game.text_channel.id}] Erro ao tocar áudio: {e}", exc_info=True)
+            logger.error(f"[Jogo #{game.text_channel.id}] Erro geral ao tocar áudio: {e}", exc_info=True)
 
     @commands.slash_command(name="iniciar", description="Inicia a primeira noite do jogo neste canal.")
     async def iniciar_jogo(self, ctx: discord.ApplicationContext):
@@ -422,60 +443,44 @@ class GameFlowCog(commands.Cog):
     async def end_game(self, game: GameInstance, title: str, winners: List[discord.Member], faction: str, reason: str, error: bool = False, sound_event_key: Optional[str] = None):
         if not self.bot.game_manager.get_game(game.text_channel.id) and not error: return
         
-        final_winners = await self._check_and_award_secondary_winners(game, winners, faction)
-        winner_ids = {w.id for w in final_winners}
+        try:
+            final_winners = await self._check_and_award_secondary_winners(game, winners, faction)
+            winner_ids = {w.id for w in final_winners}
+            
+            public_announcement_task = asyncio.create_task(self._send_public_end_game_messages(game, title, final_winners, faction, reason, sound_event_key))
+            
+            hosting_channel = self.bot.get_channel(config.CARD_HOSTING_CHANNEL_ID)
+            if not hosting_channel:
+                logger.error(f"CRÍTICO: Canal de hospedagem de cards com ID {config.CARD_HOSTING_CHANNEL_ID} não encontrado. Pulando geração de cards.")
+            else:
+                for p_state in game.players.values():
+                    if not p_state.role: continue
+                    outcome = "VICTORY" if p_state.member.id in winner_ids else "DEFEAT"
+                    try:
+                        card_path = await self.bot.loop.run_in_executor(None, self.image_generator.generate_summary_card, p_state.member.display_name, p_state.member.display_avatar.url, p_state.role.name, p_state.role.image_file, outcome, str(p_state.member.id))
+                        msg = await hosting_channel.send(file=discord.File(card_path))
+                        cdn_url = msg.attachments[0].url
+                        site_url = f"https://fezudo98.github.io/cidadedorme-site/compartilhar.html?img={cdn_url}"
+                        dm_message = (f"Aqui está o resumo da sua última partida!\n\nClique no link abaixo para ver e salvar sua imagem. Perfeito para compartilhar nos Stories!\n\n➡️ **[Ver Meu Resumo]({site_url})** ⬅️")
+                        await send_dm_safe(p_state.member, message=dm_message)
+                    except Exception as e:
+                        logger.error(f"Falha total no processo de gerar/enviar card para {p_state.member.display_name}: {e}", exc_info=True)
+
+            await public_announcement_task
+
+            game.current_phase = "finished"
+            if game.current_timer_task: game.current_timer_task.cancel()
+            
+            await self._update_voice_permissions(game, mute=False, force_unmute_all=True)
+            if (vc := discord.utils.get(self.bot.voice_clients, guild=game.guild)) and vc.is_connected():
+                if sound_event_key: await self.play_sound_effect(game, sound_event_key, wait_for_finish=True)
+                await vc.disconnect(force=True)
+
+            if not error and (ranking_cog := self.bot.get_cog("RankingCog")):
+                await ranking_cog.update_stats_after_game(game, final_winners)
         
-        public_announcement_task = asyncio.create_task(self._send_public_end_game_messages(game, title, final_winners, faction, reason, sound_event_key))
-        
-        hosting_channel = self.bot.get_channel(config.CARD_HOSTING_CHANNEL_ID)
-        if not hosting_channel:
-            logger.error(f"CRÍTICO: Canal de hospedagem de cards com ID {config.CARD_HOSTING_CHANNEL_ID} não encontrado. Pulando geração de cards.")
-        else:
-            for p_state in game.players.values():
-                if not p_state.role: continue
-
-                outcome = "VICTORY" if p_state.member.id in winner_ids else "DEFEAT"
-                
-                try:
-                    card_path = await self.bot.loop.run_in_executor(
-                        None,
-                        self.image_generator.generate_summary_card,
-                        p_state.member.display_name,
-                        p_state.member.display_avatar.url,
-                        p_state.role.name,
-                        p_state.role.image_file,
-                        outcome,
-                        str(p_state.member.id)
-                    )
-                    
-                    msg = await hosting_channel.send(file=discord.File(card_path))
-                    cdn_url = msg.attachments[0].url
-                    
-                    site_url = f"https://fezudo98.github.io/cidadedorme-site/compartilhar.html?img={cdn_url}"
-                    dm_message = (
-                        "Aqui está o resumo da sua última partida!\n\n"
-                        f"Clique no link abaixo para ver e salvar sua imagem. Perfeito para compartilhar nos Stories!\n\n"
-                        f"➡️ **[Ver Meu Resumo]({site_url})** ⬅️"
-                    )
-                    await send_dm_safe(p_state.member, message=dm_message)
-
-                except Exception as e:
-                    logger.error(f"Falha total no processo de gerar/enviar card para {p_state.member.display_name}: {e}", exc_info=True)
-
-        await public_announcement_task
-
-        game.current_phase = "finished"
-        if game.current_timer_task: game.current_timer_task.cancel()
-        
-        await self._update_voice_permissions(game, mute=False, force_unmute_all=True)
-        if (vc := discord.utils.get(self.bot.voice_clients, guild=game.guild)) and vc.is_connected():
-            if sound_event_key: await self.play_sound_effect(game, sound_event_key, wait_for_finish=True)
-            await vc.disconnect(force=True)
-
-        if not error and (ranking_cog := self.bot.get_cog("RankingCog")):
-            await ranking_cog.update_stats_after_game(game, final_winners)
-        
-        self.bot.game_manager.end_game(game.text_channel.id)
+        finally:
+            self.bot.game_manager.end_game(game.text_channel.id)
 
 def setup(bot: commands.Bot):
     bot.add_cog(GameFlowCog(bot))

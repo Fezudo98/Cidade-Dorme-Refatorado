@@ -8,6 +8,10 @@ import random
 import os
 import asyncio
 
+# --- NOVAS IMPORTAÇÕES PARA VERIFICAÇÃO DE SERVIDOR ---
+from sqlalchemy import select, insert
+from database import engine, guilds_table
+
 import config
 from .game_instance import GameInstance
 from .utils import send_dm_safe
@@ -27,6 +31,42 @@ class GameSetupCog(commands.Cog):
         self.bot = bot
         logger.info("Cog GameSetup carregado.")
 
+    async def _check_first_time_setup(self, ctx: ApplicationContext) -> bool:
+        """
+        Verifica se a mensagem de setup já foi enviada para este servidor.
+        Se não foi, envia a mensagem e registra no banco de dados.
+        Retorna True se for a primeira vez (e a mensagem foi enviada), False caso contrário.
+        """
+        # Verifica se o banco de dados está disponível para evitar erros
+        if guilds_table is None or engine is None:
+            logger.warning("Tabela de Guilds não está disponível. Pulando verificação de primeiro uso.")
+            return False
+
+        guild_id = ctx.guild.id
+        try:
+            with engine.connect() as conn:
+                # Verifica se o guild_id já existe na tabela
+                stmt_select = select(guilds_table).where(guilds_table.c.guild_id == guild_id)
+                result = conn.execute(stmt_select).first()
+
+                # Se não houver resultado, é a primeira vez.
+                if not result:
+                    logger.info(f"Primeira utilização do bot no servidor {guild_id}. Enviando mensagem de setup.")
+                    # A mensagem pública não deve ser efêmera, então enviamos diretamente pelo canal.
+                    await ctx.channel.send(config.MSG_FIRST_TIME_SETUP)
+                    
+                    # Insere o registro no banco de dados para não enviar novamente.
+                    stmt_insert = insert(guilds_table).values(guild_id=guild_id, setup_message_sent=True)
+                    conn.execute(stmt_insert)
+                    conn.commit() # Salva a alteração
+                    return True # Indica que a mensagem de setup foi enviada.
+        except Exception as e:
+            logger.error(f"Falha ao verificar/salvar o estado de setup para o servidor {guild_id}: {e}")
+            # Se houver erro de DB, permite que o bot continue, mas avisa o admin.
+            await ctx.followup.send("⚠️ Não consegui verificar as configurações iniciais do servidor. Se encontrar problemas, verifique minhas permissões.", ephemeral=True)
+
+        return False # Indica que a mensagem já foi enviada ou houve um erro.
+
     async def _distribute_roles(self, game: GameInstance, players: list[discord.Member]):
         """
         Seleciona, embaralha e distribui os papéis para uma instância de jogo específica.
@@ -41,7 +81,6 @@ class GameSetupCog(commands.Cog):
 
         roles_to_distribute = []
         
-        # 1. Preencher papéis da Cidade
         city_count = composition.get("Cidade", 0)
         city_pool = config.ROLE_POOL.get("Cidade", {})
         if city_count > 0:
@@ -54,7 +93,6 @@ class GameSetupCog(commands.Cog):
                 city_roles.extend(random.sample(investigadores, needed))
             roles_to_distribute.extend(city_roles)
 
-        # 2. Preencher papéis dos Vilões
         villain_count = composition.get("Vilões", 0)
         villain_pool = config.ROLE_POOL.get("Vilões", {})
         if villain_count > 0:
@@ -67,7 +105,6 @@ class GameSetupCog(commands.Cog):
                 villain_roles.extend(random.sample(outros, needed))
             roles_to_distribute.extend(villain_roles)
 
-        # 3. Preencher papéis Solo
         solo_count = composition.get("Solo", 0)
         if solo_count > 0:
             solo_pool = config.ROLE_POOL.get("Solo", {})
@@ -146,28 +183,28 @@ class GameSetupCog(commands.Cog):
         description="Inicia a preparação de um jogo, puxando jogadores do seu canal de voz."
     )
     async def preparar_jogo(self, ctx: ApplicationContext):
-        # --- CORREÇÃO APLICADA ---
-        # Adia a resposta para garantir que não haja timeout de 3 segundos,
-        # mesmo que a API do Discord atrase ou haja um rate limit.
         await ctx.defer(ephemeral=True)
+        
+        # --- LÓGICA DE VERIFICAÇÃO DE PRIMEIRO USO ---
+        # Se a função retornar True, significa que a mensagem de setup foi enviada.
+        if await self._check_first_time_setup(ctx):
+            # Avisa o usuário que usou o comando para checar o canal.
+            await ctx.followup.send("Guia de configuração inicial enviado no canal! Verifique as permissões e tente novamente.", ephemeral=True)
+            return # Interrompe a execução do comando.
+        # ----------------------------------------------
 
         logger.info(f"Comando /preparar recebido de {ctx.author.display_name} no canal #{ctx.channel.name}")
 
         if self.bot.game_manager.get_game(ctx.channel.id):
-            # Usa followup.send para responder após um defer().
             await ctx.followup.send("Já existe uma partida sendo preparada ou em andamento neste canal.", ephemeral=True)
             return
 
-        # 1. Checa se o AUTOR do comando está em um canal de voz
         if not ctx.author.voice or not ctx.author.voice.channel:
             logger.warning(f"Usuário {ctx.author.display_name} usou /preparar mas não está em um canal de voz.")
             await ctx.followup.send("Você precisa estar em um canal de voz para iniciar um jogo!", ephemeral=True)
             return
 
-        # 2. Pega o canal de voz do autor. Esta é a referência correta.
         voice_channel = ctx.author.voice.channel
-        
-        # 3. Pega a lista de membros diretamente deste canal.
         connected_members = [member for member in voice_channel.members if not member.bot]
         num_players = len(connected_members)
         
@@ -179,12 +216,10 @@ class GameSetupCog(commands.Cog):
 
         game = None
         try:
-            # A mensagem de "Iniciando preparação" é efêmera, então é enviada como um followup.
             await ctx.followup.send(f"Iniciando preparação para {num_players} jogadores. Verifiquem suas DMs!", ephemeral=True)
             
             game = self.bot.game_manager.create_game(ctx.channel, voice_channel, ctx.author)
             if not game:
-                # Se a criação do jogo falhar, ainda podemos usar o followup para notificar.
                 await ctx.followup.send("Erro inesperado ao criar a partida. Tente novamente.", ephemeral=True)
                 return
             
@@ -193,7 +228,6 @@ class GameSetupCog(commands.Cog):
 
             success = await self._distribute_roles(game, connected_members)
             if not success:
-                # Esta é uma mensagem pública, então ctx.channel.send é o correto.
                 await ctx.channel.send(f"⚠️ **Erro na Preparação:** Não foi possível distribuir os papéis. Verifique as configurações e os logs do bot. A preparação foi cancelada.")
                 self.bot.game_manager.end_game(ctx.channel.id)
                 return
@@ -206,7 +240,6 @@ class GameSetupCog(commands.Cog):
                 f"{player_list_text}\n\n"
                 f"🤫 Papéis distribuídos por **DM**. Quando estiverem prontos, o Mestre do Jogo (`{ctx.author.display_name}`) deve usar `/iniciar`."
             )
-            # A mensagem de anúncio principal é pública, então ctx.channel.send está correto.
             await ctx.channel.send(announcement)
 
         except Exception as e:

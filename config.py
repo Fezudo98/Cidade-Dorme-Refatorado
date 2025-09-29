@@ -122,4 +122,22 @@ def get_bot_version():
     # === ID do Canal para Hospedagem de Cards ===
 CARD_HOSTING_CHANNEL_ID = 1420614970999046154
 
+# === MENSAGEM DE SETUP DE PRIMEIRA UTILIZAÇÃO ===
+MSG_FIRST_TIME_SETUP = (
+    "👋 **Olá! Parece que é a primeira vez que o Cidade Dorme é iniciado neste servidor.**\n\n"
+    "Para que eu funcione perfeitamente e possa gerenciar as partidas sem problemas, preciso de algumas permissões. "
+    "Por favor, peça a um administrador para verificar o seguinte:\n\n"
+    "**1. Hierarquia de Cargos (O MAIS IMPORTANTE!):**\n"
+    "> Meu cargo (`Cidade Dorme`) precisa estar **ACIMA** dos cargos dos jogadores que participarão das partidas. "
+    "Se meu cargo estiver abaixo, não conseguirei silenciá-los ou movê-los entre canais.\n\n"
+    "**2. Permissões Essenciais:**\n"
+    "> O ideal é me dar a permissão de **Administrador**. Se preferir configurar manualmente, garanta que eu tenha:\n"
+    "> - `Ver Canais` e `Enviar Mensagens` (Para me comunicar)\n"
+    "> - `Gerenciar Mensagens` (Para limpar comandos)\n"
+    "> - `Embed Links` e `Anexar Arquivos` (Para as imagens e embeds bonitos)\n"
+    "> - `Conectar`, `Falar` e `Silenciar Membros` (Para gerenciar o áudio no canal de voz)\n\n"
+    "✅ **Tudo pronto? Perfeito!**\n"
+    "Use o comando `/preparar` novamente para começar a sua primeira partida."
+)
+
 BOT_VERSION = get_bot_version()

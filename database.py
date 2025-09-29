@@ -13,6 +13,7 @@ from sqlalchemy import (
     String,
     Integer,
     JSON,
+    Boolean
 )
 from sqlalchemy.engine import Engine
 
@@ -25,6 +26,7 @@ POSTGRES_URI = os.getenv("POSTGRES_URI")
 
 engine: Engine = None
 players_table: Table = None
+guilds_table: Table = None
 db_metadata = MetaData()
 
 if not POSTGRES_URI:
@@ -64,6 +66,13 @@ else:
             Column("vitorias_totais", Integer, default=0, nullable=False),
             Column("vitorias_por_papel", JSON, default={}, nullable=False),
             Column("medalhas", JSON, default=[], nullable=False),
+        )
+
+        guilds_table = Table(
+            "guilds",
+            db_metadata,
+            Column("guild_id", BigInteger, primary_key=True, autoincrement=False),
+            Column("setup_message_sent", Boolean, default=False, nullable=False),
         )
 
         with engine.connect() as connection:
