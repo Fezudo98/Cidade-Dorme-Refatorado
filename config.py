@@ -90,6 +90,7 @@ AUDIO_FILES = {
     "PLAGUE_WIN": ["plague_win.mp3"],
     "CORRUPTOR_WIN": ["corruptor_win.mp3"],
     "HEADHUNTER_WIN": ["headhunter_win.mp3"],
+    "HEALTH_CHECK": ["health_check.mp3"],
 }
 
 # === Mensagens ===
