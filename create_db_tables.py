@@ -1,3 +1,5 @@
+# create_db_tables.py (VERSÃO CORRIGIDA E ATUALIZADA)
+
 import os
 import stat
 import logging
@@ -19,28 +21,29 @@ load_dotenv()
 
 print("Iniciando script de criação de tabelas...")
 
-# --- Lógica de Conexão (copiada do seu database.py) ---
+# --- Lógica de Conexão (corrigida) ---
 POSTGRES_URI = os.getenv("POSTGRES_URI")
 
 if not POSTGRES_URI:
     print("ERRO CRÍTICO: A variável de ambiente POSTGRES_URI não foi encontrada!")
     exit()
 
-# Ajuste de permissões para a chave SSL
-KEY_FILE_PATH = 'private-key.key'
+# Define o caminho correto para o arquivo de chave, que está na pasta 'certs'
+KEY_FILE_PATH = 'certs/private-key.key'
 if os.path.exists(KEY_FILE_PATH):
     try:
+        # Define as permissões para 0600 (apenas o dono pode ler e escrever)
         os.chmod(KEY_FILE_PATH, stat.S_IRUSR | stat.S_IWUSR)
         print(f"Permissões do arquivo '{KEY_FILE_PATH}' ajustadas.")
     except Exception as e:
         print(f"Aviso: Não foi possível alterar as permissões do arquivo de chave: {e}")
 
-# Argumentos de conexão SSL
+# Argumentos de conexão SSL com os caminhos corretos
 ssl_args = {
     'sslmode': 'verify-full',
-    'sslrootcert': 'ca-certificate.crt',
-    'sslcert': 'ca-certificate.crt',
-    'sslkey': KEY_FILE_PATH
+    'sslrootcert': 'certs/ca-certificate.crt', # Caminho corrigido
+    'sslcert': 'certs/certificate.pem',        # Caminho e arquivo corrigidos
+    'sslkey': KEY_FILE_PATH                    # Usa a variável com o caminho correto
 }
 
 try:
@@ -49,6 +52,7 @@ try:
     db_metadata = MetaData()
 
     # --- Definição de TODAS as tabelas (players e guilds) ---
+    # A definição das tabelas permanece a mesma
     players_table = Table(
         "players",
         db_metadata,

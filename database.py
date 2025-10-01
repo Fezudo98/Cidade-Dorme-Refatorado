@@ -1,4 +1,4 @@
-# database.py (VERSÃO FINAL - CORRIGIDA COM AJUSTE DE PERMISSÕES)
+# database.py (VERSÃO CORRIGIDA E ATUALIZADA)
 
 import os
 import stat # Módulo para ajudar a definir permissões
@@ -32,9 +32,9 @@ db_metadata = MetaData()
 if not POSTGRES_URI:
     logger.critical("A variável de ambiente POSTGRES_URI não foi encontrada!")
 else:
-    # --- NOVO BLOCO DE CÓDIGO: AJUSTE DE PERMISSÕES ---
-    # Antes de tentar conectar, vamos garantir que a chave privada está segura.
-    KEY_FILE_PATH = 'private-key.key'
+    # --- BLOCO DE CÓDIGO ATUALIZADO ---
+    # Define o caminho correto para o arquivo de chave, que está na pasta 'certs'
+    KEY_FILE_PATH = 'certs/private-key.key'
     try:
         if os.path.exists(KEY_FILE_PATH):
             # Define as permissões para 0600 (apenas o dono pode ler e escrever)
@@ -45,11 +45,12 @@ else:
     # ---------------------------------------------------
 
     try:
+        # Define os argumentos de conexão SSL com os caminhos corretos
         ssl_args = {
             'sslmode': 'verify-full',
-            'sslrootcert': 'ca-certificate.crt', 
-            'sslcert': 'ca-certificate.crt', 
-            'sslkey': KEY_FILE_PATH
+            'sslrootcert': 'certs/ca-certificate.crt', # Caminho corrigido
+            'sslcert': 'certs/certificate.pem',        # Caminho e arquivo corrigidos
+            'sslkey': KEY_FILE_PATH                    # Usa a variável com o caminho correto
         }
 
         engine = create_engine(
@@ -57,6 +58,7 @@ else:
             connect_args=ssl_args
         )
 
+        # A definição das tabelas permanece a mesma
         players_table = Table(
             "players",
             db_metadata,
@@ -77,9 +79,10 @@ else:
 
         with engine.connect() as connection:
             db_metadata.create_all(connection)
-            logger.info("Conexão SEGURA com o PostgreSQL estabelecida e tabela 'players' garantida!")
+            logger.info("Conexão SEGURA com o PostgreSQL estabelecida e tabelas garantidas!")
 
     except Exception as e:
         logger.critical(f"Falha ao conectar com o PostgreSQL: {e}", exc_info=True)
         engine = None
         players_table = None
+        guilds_table = None # Garante que a variável guilds_table também seja None em caso de falha
