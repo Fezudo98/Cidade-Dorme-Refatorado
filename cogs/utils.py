@@ -1,11 +1,12 @@
-# cogs/utils.py
+# cogs/utils.py (VERSÃO FINAL E CORRIGIDA)
 
 import discord
 from discord.ext import commands
-from discord import option, ApplicationContext, Permissions
+from discord import option, ApplicationContext
 import logging
 import random
 import os
+import asyncio
 from typing import Optional, Dict, Type, TYPE_CHECKING
 
 from sqlalchemy import text
@@ -37,9 +38,6 @@ async def search_roles(ctx: discord.AutocompleteContext) -> list:
 # --- Funções Utilitárias ---
 
 async def send_public_message(bot: commands.Bot, channel: discord.TextChannel, message: Optional[str] = None, embed: Optional[discord.Embed] = None, file_path: Optional[str] = None, allowed_mentions: Optional[discord.AllowedMentions] = None, game: Optional['GameInstance'] = None):
-    """
-    Envia uma mensagem para um canal de texto público especificado.
-    """
     if not channel:
         logger.error("Tentativa de enviar mensagem pública para um canal nulo.")
         return
@@ -64,7 +62,6 @@ async def send_public_message(bot: commands.Bot, channel: discord.TextChannel, m
         logger.error(f"Erro ao enviar mensagem pública para {channel.name}: {e}")
 
 async def send_dm_safe(member: discord.Member, message: str = None, embed: discord.Embed = None, file: discord.File = None):
-    """Envia uma DM para um membro, tratando exceções comuns."""
     if not member or member.bot: return
     try:
         await member.send(content=message, embed=embed, file=file)
@@ -74,17 +71,14 @@ async def send_dm_safe(member: discord.Member, message: str = None, embed: disco
         logger.warning(f"Não foi possível enviar DM para {member.display_name}: {e}")
 
 def get_random_humor(category_key: str) -> str:
-    """Retorna uma frase humorística aleatória de uma categoria."""
     return random.choice(config.HUMOR_MESSAGES.get(category_key, [""]))
 
 class UtilsCog(commands.Cog):
-    """Cog para funções utilitárias, comandos informativos e de administração."""
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         logger.info("Cog Utils carregado.")
 
     def _format_roles_for_embed(self, embed: discord.Embed, roles: Dict[str, Type[Role]]):
-        """Formata a lista de papéis para um campo de embed."""
         roles_text = ""
         for role_class in roles.values():
             role_instance = role_class()
@@ -96,10 +90,17 @@ class UtilsCog(commands.Cog):
     @commands.slash_command(name="explicar", description="Explica detalhadamente como um personagem funciona.")
     @option("personagem", description="O nome do personagem que você quer entender.", autocomplete=search_roles)
     async def explicar(self, ctx: ApplicationContext, personagem: str):
-        role_class = all_role_classes.get(personagem)
+        # Busca case-insensitive pelo nome do personagem
+        role_class = None
+        for key, value in all_role_classes.items():
+            if key.lower() == personagem.lower():
+                role_class = value
+                break
+
         if not role_class:
             await ctx.respond(f"Não encontrei um personagem chamado '{personagem}'.", ephemeral=True)
             return
+            
         role_instance = role_class()
         embed = discord.Embed(title=f"🔎 Detalhes do Papel: {role_instance.name}", description=role_instance.description, color=role_instance.get_faction_color())
         embed.add_field(name="📜 Facção", value=role_instance.faction, inline=True)
@@ -133,19 +134,15 @@ class UtilsCog(commands.Cog):
         latency = self.bot.latency * 1000
         await ctx.respond(f"Pong! A latência é de {latency:.2f}ms. Estou mais vivo que a maioria dos jogadores na noite 3!", ephemeral=True)
 
-    # --- COMANDOS DE ADMINISTRAÇÃO ROBUSTOS ---
-
     @commands.slash_command(name="health", description="[Admin] Executa um teste funcional completo do bot.")
     @commands.has_permissions(manage_guild=True)
     async def health_check(self, ctx: ApplicationContext):
-        """Executa uma verificação de saúde e testes funcionais nos sistemas do bot."""
         await ctx.defer(ephemeral=True)
         
         embed = discord.Embed(title="🩺 Teste Funcional Completo", color=discord.Color.green())
         status_color = discord.Color.green()
         test_image_file = None
         
-        # --- TESTE 1: SISTEMAS BÁSICOS ---
         embed.add_field(name="--- SISTEMAS BÁSICOS ---", value="", inline=False)
         
         latency = self.bot.latency * 1000
@@ -168,7 +165,6 @@ class UtilsCog(commands.Cog):
             status_color = discord.Color.red()
         embed.add_field(name="🖼️ Pasta de Assets", value=assets_status)
 
-        # --- TESTE 2: PERMISSÕES ---
         embed.add_field(name="--- PERMISSÕES ESSENCIAIS ---", value="", inline=False)
         bot_member = ctx.guild.get_member(self.bot.user.id)
         
@@ -181,7 +177,6 @@ class UtilsCog(commands.Cog):
             if not has_perm: status_color = discord.Color.orange()
         embed.add_field(name=f"Canal #{ctx.channel.name}", value="\n".join(text_perms_status))
 
-        # --- TESTE 3: FUNCIONALIDADES DE VOZ ---
         embed.add_field(name="--- TESTE DE ÁUDIO E VOZ ---", value="", inline=False)
         
         if not ctx.author.voice or not ctx.author.voice.channel:
@@ -189,39 +184,58 @@ class UtilsCog(commands.Cog):
         else:
             voice_channel = ctx.author.voice.channel
             voice_perms = voice_channel.permissions_for(bot_member)
-            
-            voice_perms_status = []
-            required_voice_perms = {'connect': voice_perms.connect, 'speak': voice_perms.speak, 'mute_members': voice_perms.mute_members}
-            for perm, has_perm in required_voice_perms.items():
-                emoji = "✅" if has_perm else "❌"
-                voice_perms_status.append(f"{emoji} {perm}")
-                if not has_perm: status_color = discord.Color.red()
-            embed.add_field(name=f"Canal de Voz '{voice_channel.name}'", value="\n".join(voice_perms_status))
+            can_connect = voice_perms.connect
+            can_speak = voice_perms.speak
+
+            mute_perm_status = "Não testado"
+            try:
+                await ctx.author.edit(mute=True, reason="Health Check Mute Test")
+                await asyncio.sleep(0.5)
+                await ctx.author.edit(mute=False, reason="Health Check Mute Test")
+                mute_perm_status = "✅ mute_members"
+            except discord.Forbidden:
+                mute_perm_status = "❌ mute_members (ERRO DE HIERARQUIA DE CARGOS!)"
+                status_color = discord.Color.red()
+            except Exception as e:
+                logger.error(f"Erro no teste prático de mute: {e}")
+                mute_perm_status = f"❌ mute_members (Erro inesperado)"
+                status_color = discord.Color.red()
+
+            voice_perms_text = [
+                f"{'✅' if can_connect else '❌'} connect",
+                f"{'✅' if can_speak else '❌'} speak",
+                mute_perm_status
+            ]
+            if not can_connect or not can_speak: status_color = discord.Color.red()
+            embed.add_field(name=f"Canal de Voz '{voice_channel.name}'", value="\n".join(voice_perms_text))
             
             audio_status = "Não testado"
-            if required_voice_perms['connect'] and required_voice_perms['speak']:
+            if can_connect and can_speak:
                 game_flow_cog: 'GameFlowCog' = self.bot.get_cog("GameFlowCog")
                 if not game_flow_cog:
                     audio_status = "❌ Falha: Cog de fluxo de jogo não encontrado."
                     status_color = discord.Color.red()
                 else:
-                    try:
-                        from types import SimpleNamespace
-                        mock_game = SimpleNamespace(guild=ctx.guild, voice_channel=voice_channel, asset_error_notified=False)
-                        await game_flow_cog.play_sound_effect(mock_game, "HEALTH_CHECK", wait_for_finish=True)
+                    from types import SimpleNamespace
+                    mock_game = SimpleNamespace(
+                        guild=ctx.guild, voice_channel=voice_channel, 
+                        text_channel=ctx.channel, asset_error_notified=False
+                    )
+                    
+                    success = await game_flow_cog.play_sound_effect(mock_game, "HEALTH_CHECK", wait_for_finish=True)
+                    
+                    if success:
                         audio_status = "✅ Sucesso: Áudio de teste executado!"
-                        
-                        vc = discord.utils.get(self.bot.voice_clients, guild=ctx.guild)
-                        if vc: await vc.disconnect()
-                    except Exception as e:
-                        logger.error(f"Erro no teste de áudio do /health: {e}")
-                        audio_status = f"❌ Falha: {e}"
+                    else:
+                        audio_status = "❌ Falha: Não foi possível conectar ou tocar o áudio. Verifique os logs e o firewall da hospedagem."
                         status_color = discord.Color.red()
+                    
+                    if vc := discord.utils.get(self.bot.voice_clients, guild=ctx.guild):
+                        await vc.disconnect(force=True)
             else:
                 audio_status = "⚠️ Pulei o teste: Permissões de 'conectar' ou 'falar' ausentes."
             embed.add_field(name="🎶 Teste de Reprodução", value=audio_status, inline=False)
 
-        # --- TESTE 4: ENVIO DE IMAGEM ---
         embed.add_field(name="--- TESTE DE ENVIO DE IMAGEM ---", value="", inline=False)
         
         img_status = "Não testado"
@@ -248,7 +262,6 @@ class UtilsCog(commands.Cog):
         embed.set_footer(text="Vermelho = Erro Crítico | Laranja = Aviso/Problema de Permissão")
         
         await ctx.followup.send(embed=embed, file=test_image_file, ephemeral=True)
-
 
     @commands.slash_command(name="encerrar", description="[Admin] Força o fim de uma partida ou cancela uma preparação neste canal.")
     @commands.has_permissions(manage_guild=True)

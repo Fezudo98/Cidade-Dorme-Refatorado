@@ -99,55 +99,70 @@ class GameFlowCog(commands.Cog):
                 logger.info(f"[Jogo #{game.text_channel.id}] Timer cancelado.")
         game.current_timer_task = asyncio.create_task(timer_task())
 
-    # --- FUNÇÃO CORRIGIDA ---
-    async def play_sound_effect(self, game: GameInstance, event_key: str, wait_for_finish: bool = False):
-        if not config.AUDIO_ENABLED or not game.voice_channel: return
-        if not (sound_list := config.AUDIO_FILES.get(event_key)): return
+    # --- FUNÇÃO DE ÁUDIO CORRIGIDA COM RETORNO DE STATUS ---
+    async def play_sound_effect(self, game: GameInstance, event_key: str, wait_for_finish: bool = False) -> bool:
+        if not config.AUDIO_ENABLED or not game.voice_channel:
+            return True # Considera sucesso se o áudio está desativado
+
+        sound_list = config.AUDIO_FILES.get(event_key)
+        if not sound_list:
+            logger.warning(f"Nenhum arquivo de áudio definido para o evento: {event_key}")
+            return True # Não é um erro crítico, apenas um som ausente na config
 
         chosen_file = random.choice(sound_list)
         audio_path = os.path.join(config.AUDIO_PATH, chosen_file)
 
         if not os.path.exists(audio_path):
             logger.error(f"Arquivo de áudio não encontrado: {audio_path}")
-            if not game.asset_error_notified:
-                game.asset_error_notified = True
+            game_instance = self.bot.game_manager.get_game(game.text_channel.id)
+            if game_instance and not game_instance.asset_error_notified:
+                game_instance.asset_error_notified = True
                 await send_public_message(self.bot, game.text_channel, message=f"⚠️ **Aviso para o Admin:** Não encontrei os arquivos de áudio/imagem.")
-            return
+            return False # Isso é uma falha de configuração
 
-        if not game.voice_channel.members: return
+        voice_client = discord.utils.get(self.bot.voice_clients, guild=game.guild)
 
         try:
-            # Pega o cliente de voz existente para o servidor.
-            voice_client = discord.utils.get(self.bot.voice_clients, guild=game.guild)
+            # Lógica de conexão robusta para evitar clientes "zumbis"
+            if voice_client and voice_client.is_connected():
+                if voice_client.channel != game.voice_channel:
+                    await voice_client.move_to(game.voice_channel)
+            else:
+                if voice_client:
+                    await voice_client.disconnect(force=True)
+                voice_client = await game.voice_channel.connect(timeout=20.0, reconnect=True)
 
-            # Se não estiver conectado, conecta.
-            if voice_client is None or not voice_client.is_connected():
-                voice_client = await asyncio.wait_for(game.voice_channel.connect(), timeout=10.0)
-            # Se estiver conectado em outro canal, move para o canal do jogo.
-            elif voice_client.channel != game.voice_channel:
-                await voice_client.move_to(game.voice_channel)
-            
-            # Agora, temos certeza que 'voice_client' é válido e está no canal correto.
+            if not voice_client: # Verificação extra de segurança
+                 raise Exception("O cliente de voz não foi conectado com sucesso.")
+
             if voice_client.is_playing():
                 voice_client.stop()
-            
+
             source = discord.FFmpegPCMAudio(audio_path)
             
             if wait_for_finish:
                 finished = asyncio.Event()
-                voice_client.play(source, after=lambda e: finished.set())
+                def after_playing(error):
+                    if error: logger.error(f"Erro no callback do áudio: {error}")
+                    finished.set()
+                
+                voice_client.play(source, after=after_playing)
                 await asyncio.wait_for(finished.wait(), timeout=30.0)
             else:
                 voice_client.play(source)
 
-        except discord.errors.ClientException as e:
-            # Captura especificamente o erro de já estar conectado para evitar spam nos logs
-            if "Already connected" in str(e):
-                logger.warning(f"[Jogo #{game.text_channel.id}] Tentativa de conexão de áudio redundante foi ignorada.")
-            else:
-                logger.error(f"[Jogo #{game.text_channel.id}] Erro de cliente de áudio: {e}", exc_info=True)
+            return True # Retorna True no final do bloco try bem-sucedido
+
+        except asyncio.TimeoutError:
+            logger.error(f"[Jogo #{game.text_channel.id}] Timeout ao tentar conectar/reproduzir no canal de voz.")
+            if vc := discord.utils.get(self.bot.voice_clients, guild=game.guild):
+                await vc.disconnect(force=True)
+            return False
         except Exception as e:
-            logger.error(f"[Jogo #{game.text_channel.id}] Erro geral ao tocar áudio: {e}", exc_info=True)
+            logger.error(f"[Jogo #{game.text_channel.id}] Erro inesperado na operação de áudio: {e}")
+            if vc := discord.utils.get(self.bot.voice_clients, guild=game.guild):
+                await vc.disconnect(force=True)
+            return False
 
     @commands.slash_command(name="iniciar", description="Inicia a primeira noite do jogo neste canal.")
     async def iniciar_jogo(self, ctx: discord.ApplicationContext):
